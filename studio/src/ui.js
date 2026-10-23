@@ -588,7 +588,7 @@ export class StudioUI {
     this.main.hidden = workspaceOpen;
     Object.entries(this.screens).forEach(([name, screen]) => { screen.hidden = name !== view; });
     this.workspace.hidden = !workspaceOpen;
-    this.nav.hidden = !state.user || !state.role;
+    this.nav.hidden = !state.user || !state.role || view === 'signin';
     this.account.hidden = !state.user;
     this.accessNav.hidden = !isOwner(state.role);
     this.libraryNav.setAttribute('aria-current', view === 'library' ? 'page' : 'false');
@@ -625,7 +625,7 @@ export class StudioUI {
     this.forgotButton.hidden = recovery || setPassword || typeof this.callbacks.onRequestRecovery !== 'function';
     this.backToSignIn.hidden = !recovery;
     putText(this.authEyebrow, recovery ? 'BACK TO YOUR WORKSPACE' : setPassword ? 'YOUR INVITATION' : 'WELCOME BACK');
-    putText(this.authTitle, recovery ? 'Reset your password' : setPassword ? 'Set up your editor account' : 'Sign in to your studio');
+    putText(this.authTitle, recovery ? 'Reset your password' : setPassword ? 'Set up your studio account' : 'Sign in to your studio');
     putText(this.authDescription, recovery ? 'We’ll send a recovery link to your workspace email.' : setPassword ? 'Choose a password of at least 8 characters to continue.' : 'Use the email invited to this workspace.');
     this.authForm.setAttribute('aria-label', recovery ? 'Recover studio account' : setPassword ? 'Set account password' : 'Studio sign in');
     this.authFooter.hidden = setPassword;

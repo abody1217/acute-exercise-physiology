@@ -6,6 +6,7 @@ import './styles.css';
 
 let cloud,identity,current,authSubscription;
 let opening=0,authLoading=false,runtime;
+const SETUP_KEY='presentation-studio:password-setup';
 // Capture fragment invitations before Supabase inspects location.hash. Remove
 // bearer material before the first fetch, including legacy query links.
 const callbackUrl=new URL(location.href);
@@ -25,7 +26,7 @@ const ui=new StudioUI({
   onSetPassword:async password=>{
     const {error}=await cloud.client.auth.updateUser({password});
     if(error)throw error;
-    welcome=false;ui.password.value='';ui.passwordConfirm.value='';
+    welcome=false;sessionStorage.removeItem(SETUP_KEY);ui.password.value='';ui.passwordConfirm.value='';
     await authenticated();
   },
   onSignOut:async()=>{
@@ -66,7 +67,7 @@ function dispose() {
   if(current){current.closed=true;clearTimeout(current.timer);clearTimeout(current.readyTimer);current.viewer?.destroy();current.frame?.remove();current.images.clear();}
   current=null;ui.frameHost.replaceChildren();
 }
-function signedOut() {dispose();identity=null;welcome=false;ui.render({view:'signin',authMode:'signin',user:null,role:null,presentations:[],members:[],error:'',notice:'',inviteUrl:''});}
+function signedOut() {dispose();identity=null;welcome=false;sessionStorage.removeItem(SETUP_KEY);ui.render({view:'signin',authMode:'signin',user:null,role:null,presentations:[],members:[],error:'',notice:'',inviteUrl:''});}
 async function start() {
   try {
     ui.render({view:'loading',error:'',notice:''});
@@ -89,6 +90,8 @@ async function start() {
     const {data,error}=await cloud.client.auth.getSession();
     if(error)throw error;
     if(!data.session){ui.render({view:'signin',authMode:'signin',user:null,role:null});return;}
+    if(welcome)sessionStorage.setItem(SETUP_KEY,data.session.user.id);
+    else welcome=sessionStorage.getItem(SETUP_KEY)===data.session.user.id;
     await authenticated();
   } catch(error){ui.render({view:'error',error:error.message});}
 }
@@ -111,6 +114,7 @@ async function library() {
 }
 async function members() {ui.render({view:'access',members:await cloud.members(),error:''});}
 async function navigate(view) {
+  if(welcome){ui.render({view:'signin',authMode:'set-password'});return;}
   if(!identity){await authenticated();return;}
   if(!mayLeave())return;
   dispose();
