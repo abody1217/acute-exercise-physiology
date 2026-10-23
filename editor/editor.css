@@ -1,0 +1,33 @@
+/* Editing affects the workspace only; presentation mode keeps authored motion. */
+body[data-pe-editing]:not([data-pe-preview]) deck-stage > section [data-a],
+body[data-pe-editing]:not([data-pe-preview]) deck-stage > section [data-pe-effect] {
+  animation: none !important;
+}
+body[data-pe-editing] deck-stage > section [data-pe-id] { cursor: pointer; }
+body[data-pe-editing] deck-stage > section [data-pe-selected] {
+  outline: 4px solid #a65427 !important;
+  outline-offset: 7px;
+}
+body[data-pe-editing] deck-stage > section [data-pe-hover]:not([data-pe-selected]) {
+  outline: 3px dashed #a65427;
+  outline-offset: 5px;
+}
+@keyframes pe-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pe-up { from { opacity: 0; translate: 0 46px; } to { opacity: 1; translate: 0 0; } }
+@keyframes pe-down { from { opacity: 0; translate: 0 -46px; } to { opacity: 1; translate: 0 0; } }
+@keyframes pe-left { from { opacity: 0; translate: 46px 0; } to { opacity: 1; translate: 0 0; } }
+@keyframes pe-right { from { opacity: 0; translate: -46px 0; } to { opacity: 1; translate: 0 0; } }
+@keyframes pe-zoom { from { opacity: 0; scale: .75; } to { opacity: 1; scale: 1; } }
+@keyframes pe-pop { 0% { opacity: 0; scale: .65; } 75% { opacity: 1; scale: 1.06; } 100% { opacity: 1; scale: 1; } }
+@media (prefers-reduced-motion: no-preference) {
+  [data-deck-active] [data-pe-effect]:not([data-pe-effect="none"]) {
+    animation: var(--pe-animation) var(--pe-duration, 800ms) ease var(--pe-delay, 0ms) both !important;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+}
+[data-deck-active] [data-pe-effect="none"] { animation: none !important; }
+@media print {
+  #pe-editor, .pe-editor, [data-pe-ui] { display: none !important; }
+  [data-pe-selected], [data-pe-hover] { outline: none !important; }
+}
