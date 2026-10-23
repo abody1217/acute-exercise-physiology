@@ -9,6 +9,7 @@ await mkdir(assets,{recursive:true});
 await build({entryPoints:[path.join(root,'src/app.js')],outdir:assets,bundle:true,format:'esm',splitting:true,minify:true,sourcemap:false,target:['chrome120','firefox120','safari17'],legalComments:'linked',loader:{'.wasm':'file'}});
 const editor = {};
 for (const [key,file] of Object.entries({css:'editor.css',core:'editor.js',ui:'editor-ui.js',files:'editor-files.js'})) editor[key]=await readFile(path.join(root,'../editor',file),'utf8');
+editor.css=(await readFile(path.join(root,'../editor/editor-ui.css'),'utf8'))+'\n'+editor.css;
 await writeFile(path.join(assets,'editor-runtime.json'),JSON.stringify(editor));
 const pdf = path.join(root,'node_modules/pdfjs-dist');
 await cp(path.join(pdf,'legacy/build/pdf.worker.min.mjs'),path.join(assets,'pdf.worker.min.mjs'));

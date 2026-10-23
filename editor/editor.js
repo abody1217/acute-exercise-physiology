@@ -314,8 +314,10 @@
         overlay.style.bottom = bottom ? bottom + 8 + 'px' : '';
       }
       if (open) {
-        canvas.style.transform = 'scale(' + Math.min((window.innerWidth - deck._railWidth() - right) / deck.designWidth,
-          (window.innerHeight - bottom) / deck.designHeight) + ')';
+        // A transient oversized panel must never produce a negative scale,
+        // which flips the slide while styles or viewport dimensions settle.
+        canvas.style.transform = 'scale(' + Math.min(Math.max(1, window.innerWidth - deck._railWidth() - right) / deck.designWidth,
+          Math.max(1, window.innerHeight - bottom) / deck.designHeight) + ')';
       }
     };
 
@@ -420,7 +422,9 @@
         if (epoch !== mutationEpoch || operation !== pendingOperation) { message('Import cancelled because the draft changed. Please import again.'); return; }
         commit(imported.patches);
       }),
-      onReset: safeAction(() => commit({...seed.patches}))
+      // Studio's seed is the last saved cloud state. Reset removes those edits
+      // too; a standalone file keeps its published version as the baseline.
+      onReset: safeAction(() => commit(studio ? {} : {...seed.patches}))
     }, {studio: Boolean(studio)});
     ui.root.addEventListener('keydown', event => event.stopPropagation());
     ui.textInput.maxLength = 10000;

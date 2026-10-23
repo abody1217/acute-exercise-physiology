@@ -1,0 +1,13 @@
+# studio-access verifies every user JWT by calling Supabase Auth getUser.
+# Disabling the legacy gateway check supports current asymmetric signing keys.
+# There is no unauthenticated mutation path in the function itself.
+[functions.studio-access]
+verify_jwt = false
+
+# Optional, temporary setup endpoint. Its own 256-bit capability is required.
+# Deploy disabled.ts over its entrypoint immediately after bootstrap succeeds.
+[functions.studio-bootstrap]
+verify_jwt = false
+
+[functions.studio-test-setup]
+verify_jwt = false

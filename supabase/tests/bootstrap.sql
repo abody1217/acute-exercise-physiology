@@ -1,0 +1,25 @@
+begin;
+insert into auth.users(id,email,email_confirmed_at) values('aaaaaaaa-0000-4000-8000-000000000001','bootstrap-owner@example.test',null);
+insert into studio_private.bootstrap_state(owner_email,capability_hash,expires_at)
+values('bootstrap-owner@example.test',repeat('a',64),now()+interval '10 minutes');
+set local role authenticated;
+select public.test_denied($q$select public.studio_bootstrap_claim(repeat('a',64),'aaaaaaaa-0000-4000-8000-000000000002')$q$,'42501','browser users cannot claim bootstrap');
+set local role service_role;
+select public.test_denied($q$select public.studio_bootstrap_claim(repeat('b',64),'aaaaaaaa-0000-4000-8000-000000000002')$q$,'PT403','bootstrap capability hash must match configured state');
+select public.test_assert((public.studio_bootstrap_claim(repeat('a',64),'aaaaaaaa-0000-4000-8000-000000000002')->>'completed')::boolean=false,'one request claims setup');
+select public.test_denied($q$select public.studio_bootstrap_claim(repeat('a',64),'aaaaaaaa-0000-4000-8000-000000000003')$q$,'PT409','second concurrent bootstrap cannot claim');
+select public.test_assert(not public.studio_bootstrap_release('aaaaaaaa-0000-4000-8000-000000000003'),'wrong claim cannot release setup');
+select public.test_assert(public.studio_bootstrap_release('aaaaaaaa-0000-4000-8000-000000000002'),'failed claim can release for retry');
+select public.test_assert((public.studio_bootstrap_claim(repeat('a',64),'aaaaaaaa-0000-4000-8000-000000000003')->>'completed')::boolean=false,'retry can claim after explicit release');
+select public.test_denied($q$select public.studio_bootstrap_finish('aaaaaaaa-0000-4000-8000-000000000003','aaaaaaaa-0000-4000-8000-000000000004','{"iv":"test","ciphertext":"sealed"}')$q$,'PT400','bootstrap cannot elevate a different account');
+select public.test_assert(public.studio_bootstrap_finish('aaaaaaaa-0000-4000-8000-000000000003','aaaaaaaa-0000-4000-8000-000000000001','{"iv":"test","ciphertext":"sealed"}'),'bootstrap commits initial owner once');
+select public.test_assert((public.studio_bootstrap_claim(repeat('a',64),'aaaaaaaa-0000-4000-8000-000000000004')->>'completed')::boolean,'completed retry returns saved encrypted result');
+select public.test_assert(not public.studio_bootstrap_release('aaaaaaaa-0000-4000-8000-000000000003'),'completed claim cannot reset setup');
+set local role authenticated;
+select set_config('request.jwt.claim.sub','aaaaaaaa-0000-4000-8000-000000000001',true);
+select public.test_assert(public.studio_identity() is null,'invited owner has no access until account confirmation');
+reset role;
+update studio_private.bootstrap_state set expires_at=now()-interval '1 second';
+set local role service_role;
+select public.test_denied($q$select public.studio_bootstrap_claim(repeat('a',64),'aaaaaaaa-0000-4000-8000-000000000004')$q$,'PT403','expired bootstrap cannot recover result');
+rollback;
