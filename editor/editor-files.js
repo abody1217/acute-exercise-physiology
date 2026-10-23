@@ -18,7 +18,7 @@
 
   function validateState(state) {
     if (!plainObject(state) || state.format !== 'acute-exercise-editor' ||
-        state.version !== 1 || state.deckId !== 'acute-exercise-v1' ||
+        state.version !== 1 || typeof state.deckId !== 'string' || !state.deckId.trim() || state.deckId.length > 200 ||
         typeof state.documentId !== 'string' || !state.documentId.trim() ||
         state.documentId.length > 200 || !plainObject(state.patches)) {
       throw new Error('This is not a compatible presentation changes file.');
@@ -313,15 +313,18 @@
     const seed = doc.querySelector('script#pe-seed[type="application/json"]');
     const manifest = doc.querySelector('script[type="__bundler/manifest"]');
     const template = doc.querySelector('script[type="__bundler/template"]');
-    if (!seed || !manifest || !template) {
+    const bundled = Boolean(manifest && template);
+    if (!seed || Boolean(manifest) !== Boolean(template) || (!bundled && !doc.querySelector('deck-stage'))) {
       throw new Error('The original presentation bundle is incomplete. Reload before exporting.');
     }
-    let originalTemplate;
-    try { originalTemplate = JSON.parse(template.textContent); } catch (error) {
-      throw new Error('The original presentation template is damaged.', { cause: error });
+    let originalTemplate = null;
+    if (bundled) {
+      try { originalTemplate = JSON.parse(template.textContent); } catch (error) {
+        throw new Error('The original presentation template is damaged.', { cause: error });
+      }
+      if (typeof originalTemplate !== 'string') throw new Error('The original presentation template is damaged.');
     }
-    if (typeof originalTemplate !== 'string' || hasTemporaryAssets(doc) ||
-        hasTemporaryAssets(parser.parseFromString(originalTemplate, 'text/html'))) {
+    if (hasTemporaryAssets(doc) || (bundled && hasTemporaryAssets(parser.parseFromString(originalTemplate, 'text/html')))) {
       throw new Error('The presentation contains temporary image links and cannot be exported safely.');
     }
     // Escape less-than signs in JSON script data, including a user's literal

@@ -1,7 +1,10 @@
 /* Editing affects the workspace only; presentation mode keeps authored motion. */
+body[data-pe-editing]:not([data-pe-preview]) deck-stage > section,
+body[data-pe-editing]:not([data-pe-preview]) deck-stage > section *,
 body[data-pe-editing]:not([data-pe-preview]) deck-stage > section [data-a],
 body[data-pe-editing]:not([data-pe-preview]) deck-stage > section [data-pe-effect] {
   animation: none !important;
+  transition: none !important;
 }
 body[data-pe-editing] deck-stage > section [data-pe-id] { cursor: pointer; }
 body[data-pe-editing] deck-stage > section [data-pe-selected] {

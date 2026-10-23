@@ -4,15 +4,34 @@
   const EFFECTS = new Set(['original', 'none', 'fade', 'up', 'down', 'left', 'right', 'zoom', 'pop']);
   const DURATIONS = {up: 800, fade: 1000, pop: 700, draw: 1800, growx: 1100, growy: 1100, flow: 1400, beat: 1800, float: 6000, dot: 3000};
   const FORMAT = 'acute-exercise-editor';
-  const DECK = 'acute-exercise-v1';
+  const DEFAULT_DECK = 'acute-exercise-v1';
+  const STUDIO_NAMESPACE = 'presentation-editor-studio';
   const MAX_DOWNLOAD = 25 * 1024 * 1024;
   const motionProperties = ['animation-duration', 'animation-delay', '--pe-animation', '--pe-duration', '--pe-delay'];
   const plain = value => value && typeof value === 'object' && !Array.isArray(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
   const shorten = value => String(value).replace(/\s+/g, ' ').trim().slice(0, 72);
   const milliseconds = (value, fallback) => value ? parseFloat(value) * (value.endsWith('ms') ? 1 : 1000) : fallback;
+  const identifier = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 200;
+
+  function readStudioContext() {
+    const value = window.__peStudioContext;
+    if (value === undefined || value === null) return null;
+    let origin;
+    try { origin = new URL(value.parentOrigin); } catch (_) { throw new Error('The Studio parent origin is invalid.'); }
+    if (!plain(value) || window.parent === window || !identifier(value.channel) || value.channel.length < 16 ||
+        !identifier(value.deckId) || !identifier(value.documentId) || !['edit', 'present'].includes(value.mode) ||
+        !['http:', 'https:'].includes(origin.protocol) || origin.origin !== value.parentOrigin) {
+      throw new Error('The Studio connection settings are invalid.');
+    }
+    return Object.freeze({channel: value.channel, parentOrigin: value.parentOrigin, deckId: value.deckId,
+      documentId: value.documentId, mode: value.mode,
+      ...(Object.prototype.hasOwnProperty.call(value, 'patches') ? {patches: value.patches} : {})});
+  }
 
   function start(deck) {
     const files = window.PresentationEditorFiles;
+    const studio = readStudioContext();
+    const deckId = studio ? studio.deckId : identifier(window.__peSeed && window.__peSeed.deckId) ? window.__peSeed.deckId : DEFAULT_DECK;
     const slides = Array.from(deck.children).filter(el => el.tagName === 'SECTION');
     const records = new Map();
     const slideItems = slides.map(() => []);
@@ -24,7 +43,7 @@
     let selectedId = null;
     let open = false;
     let ui;
-    let status = 'Published presentation. Edits are saved as a browser draft.';
+    let status = studio ? 'Loading your saved presentation…' : 'Published presentation. Edits are saved as a browser draft.';
     let statusKind = 'normal';
     let undo = [];
     let redo = [];
@@ -38,6 +57,20 @@
     let mutationEpoch = 0;
     let pendingOperation = 0;
     let seed;
+    let studioLoaded = !studio;
+    let studioRevision = 0;
+    let studioSavedRevision = 0;
+    let studioSaving = false;
+
+    function postStudio(type, detail) {
+      if (!studio) return;
+      window.parent.postMessage({namespace: STUDIO_NAMESPACE, version: 1, channel: studio.channel,
+        type, deckId, documentId: studio.documentId, revision: studioRevision, ...detail}, studio.parentOrigin);
+    }
+
+    function requireLoaded() {
+      if (studio && !studioLoaded) throw new Error('Wait for your saved presentation to finish loading.');
+    }
 
     function motionFor(element, slideIndex) {
       const target = element.closest('[data-a]') || element;
@@ -82,7 +115,7 @@
     });
 
     function validateState(value) {
-      if (!plain(value) || value.format !== FORMAT || value.version !== 1 || value.deckId !== DECK ||
+      if (!plain(value) || value.format !== FORMAT || value.version !== 1 || value.deckId !== deckId ||
           typeof value.documentId !== 'string' || !value.documentId || value.documentId.length > 200 || !plain(value.patches)) {
         throw new Error('This changes file belongs to a different presentation or editor version.');
       }
@@ -109,13 +142,13 @@
               !Number.isFinite(patch.delay) || patch.delay < 0 || patch.delay > 10000) throw new Error('An animation setting is invalid.');
           clean[id] = {effect: patch.effect, duration: patch.duration, delay: patch.delay};
         }
-        if (totalSize > 19 * 1024 * 1024) throw new Error('These changes are too large to publish through GitHub. Use smaller replacement images.');
+        if (totalSize > 19 * 1024 * 1024) throw new Error(studio ? 'These changes are too large. Use smaller replacement images.' : 'These changes are too large to publish through GitHub. Use smaller replacement images.');
       }
-      return {format: FORMAT, version: 1, deckId: DECK, documentId: value.documentId, patches: clean};
+      return {format: FORMAT, version: 1, deckId, documentId: value.documentId, patches: clean};
     }
 
     function currentState(documentId) {
-      return {format: FORMAT, version: 1, deckId: DECK, documentId: documentId || seed.documentId, patches: {...patches}};
+      return {format: FORMAT, version: 1, deckId, documentId: documentId || seed.documentId, patches: {...patches}};
     }
 
     function applyAll() {
@@ -169,7 +202,9 @@
           alt: record.type === 'image' ? record.element.getAttribute('alt') || '' : undefined,
           motion: patches[motion.id] || motion.baseline,
           motionLabel: motion.element === record.element ? 'Applies to this item' : 'Applies to the containing animation group'} : null,
-        status, statusKind, canUndo: undo.length > 0, canRedo: redo.length > 0, dirty: Object.keys(patches).length > 0});
+        status, statusKind, canUndo: undo.length > 0, canRedo: redo.length > 0,
+        loading: studio && !studioLoaded, saving: studioSaving,
+        dirty: studio ? studioRevision !== studioSavedRevision : Object.keys(patches).length > 0});
     }
 
     function message(text, error) {
@@ -187,6 +222,13 @@
     }
 
     function saveSoon() {
+      if (studio) {
+        studioRevision++;
+        studioSaving = false;
+        message('Changes are waiting to be saved online.');
+        postStudio('changes', {state: currentState()});
+        return;
+      }
       clearTimeout(saveTimer);
       const version = ++saveVersion;
       message('Saving draft on this browser…');
@@ -202,6 +244,7 @@
     }
 
     function commit(next) {
+      requireLoaded();
       mutationEpoch++;
       const clean = validateState({...currentState(), patches: next}).patches;
       if (JSON.stringify(clean) === JSON.stringify(patches)) return;
@@ -221,6 +264,7 @@
     }
 
     function history(backward) {
+      requireLoaded();
       mutationEpoch++;
       const from = backward ? undo : redo;
       const to = backward ? redo : undo;
@@ -276,6 +320,7 @@
     };
 
     function resumeDraft() {
+      if (studio) return;
       if (draftApplied || !draftChecked || !open) return;
       draftApplied = true;
       if (availableDraft && !hasEdited) {
@@ -285,7 +330,7 @@
       }
     }
 
-    function toggle(value) {
+    function toggle(value, notifyParent = true) {
       open = value;
       document.body.toggleAttribute('data-pe-editing', open);
       stopPreview();
@@ -302,6 +347,7 @@
         void slide.offsetWidth;
         slide.setAttribute('data-deck-active', '');
       }
+      if (studio && notifyParent) postStudio('mode-change', {mode: open ? 'edit' : 'present'});
     }
 
     const safeAction = action => async (...args) => {
@@ -310,7 +356,7 @@
     };
 
     ui = new window.PresentationEditorUI({
-      onToggle: toggle, onSelect: select, onUndo: () => history(true), onRedo: () => history(false),
+      onToggle: toggle, onSelect: select, onUndo: safeAction(() => history(true)), onRedo: safeAction(() => history(false)),
       onApplyText: safeAction(text => {
         const record = records.get(selectedId);
         if (record && record.type === 'text') changeOne(record.id, {text});
@@ -329,7 +375,20 @@
         if (record) changeOne((record.type === 'motion' ? record : record.motion).id, settings);
       }),
       onPreview: replay,
+      onSaveOnline: safeAction(() => {
+        requireLoaded();
+        if (!studio) return;
+        studioSaving = true;
+        message('Saving your presentation online…');
+        postStudio('save-request', {state: currentState()});
+      }),
       onDownload: safeAction(() => {
+        requireLoaded();
+        if (studio) {
+          postStudio('download-request', {kind: 'html', filename: 'index.html', state: currentState()});
+          message('Preparing your presentation backup…');
+          return;
+        }
         const id = 'acute-exercise-' + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2));
         const blob = files.buildExport(window.__peBundleHtml, currentState(id));
         if (blob.size > MAX_DOWNLOAD) throw new Error('This file is larger than GitHub’s 25 MB upload limit. Use smaller replacement images.');
@@ -337,10 +396,17 @@
         message('Download ready. Upload index.html to GitHub to update the shared link.');
       }),
       onExport: safeAction(() => {
+        requireLoaded();
+        if (studio) {
+          postStudio('download-request', {kind: 'changes', filename: 'presentation-changes.json', state: currentState()});
+          message('Preparing your changes backup…');
+          return;
+        }
         files.download(new Blob([JSON.stringify(currentState(), null, 2)], {type: 'application/json'}), 'presentation-changes.json');
         message('Changes exported as a backup.');
       }),
       onImport: safeAction(async file => {
+        requireLoaded();
         const epoch = mutationEpoch;
         const operation = ++pendingOperation;
         const imported = validateState(await files.readChanges(file));
@@ -354,8 +420,8 @@
         if (epoch !== mutationEpoch || operation !== pendingOperation) { message('Import cancelled because the draft changed. Please import again.'); return; }
         commit(imported.patches);
       }),
-      onReset: () => commit({...seed.patches})
-    });
+      onReset: safeAction(() => commit({...seed.patches}))
+    }, {studio: Boolean(studio)});
     ui.root.addEventListener('keydown', event => event.stopPropagation());
     ui.textInput.maxLength = 10000;
     ui.altInput.maxLength = 2000;
@@ -411,29 +477,101 @@
       }
     }, true));
 
-    try {
-      seed = validateState(window.__peSeed);
-    } catch (error) {
-      seed = {format: FORMAT, version: 1, deckId: DECK, documentId: 'acute-exercise-main-v1', patches: {}};
-      message('Saved edits could not be loaded: ' + error.message, true);
+    function applyStudioState(value) {
+      const loaded = validateState(value);
+      if (loaded.documentId !== studio.documentId) throw new Error('This saved state belongs to a different Studio document.');
+      mutationEpoch++;
+      pendingOperation++;
+      seed = loaded;
+      patches = loaded.patches;
+      undo = [];
+      redo = [];
+      hasEdited = false;
+      // Keep revisions monotonic across a later parent refresh so an older
+      // in-flight save acknowledgement cannot mark newer edits as saved.
+      if (studioLoaded) studioRevision++;
+      studioSavedRevision = studioRevision;
+      studioSaving = false;
+      studioLoaded = true;
+      stopPreview();
+      applyAll();
+      message('Saved presentation loaded. Changes save online.');
+    }
+
+    if (studio) {
+      seed = {format: FORMAT, version: 1, deckId, documentId: studio.documentId, patches: {}};
+      window.addEventListener('message', event => {
+        if (!event.isTrusted || event.source !== window.parent || event.origin !== studio.parentOrigin) return;
+        const data = event.data;
+        if (!plain(data) || data.namespace !== STUDIO_NAMESPACE || data.version !== 1 || data.channel !== studio.channel ||
+            data.deckId !== deckId || data.documentId !== studio.documentId) return;
+        try {
+          if (data.type === 'load-state') {
+            applyStudioState(data.state);
+            postStudio('state-loaded', {loaded: true});
+          } else if (data.type === 'save-status') {
+            if (typeof data.message !== 'string' || data.message.length > 2000 ||
+                !['normal', 'success', 'saved', 'saving', 'error'].includes(data.kind)) return;
+            const acknowledged = Number.isSafeInteger(data.revision) ? data.revision : studioRevision;
+            if (acknowledged < 0 || acknowledged > studioRevision) return;
+            if (data.kind === 'saving') {
+              if (acknowledged === studioRevision) { studioSaving = true; message(data.message); }
+              return;
+            }
+            studioSaving = false;
+            if (data.kind !== 'error') studioSavedRevision = Math.max(studioSavedRevision, acknowledged);
+            if (acknowledged === studioRevision) message(data.message, data.kind === 'error');
+            else if (data.kind !== 'error') message('Earlier changes saved. Newer changes are waiting to be saved online.');
+            else render();
+          } else if (data.type === 'set-mode' && ['edit', 'present'].includes(data.mode)) {
+            ui.setOpen(data.mode === 'edit');
+            toggle(data.mode === 'edit', false);
+          }
+        } catch (error) {
+          message(error.message || 'The Studio update could not be applied.', true);
+          postStudio('state-error', {message: String(error.message || 'The Studio update could not be applied.').slice(0, 2000)});
+        }
+      });
+      if (Object.prototype.hasOwnProperty.call(studio, 'patches')) {
+        try { applyStudioState({...seed, patches: studio.patches}); }
+        catch (error) { message('Saved edits could not be loaded: ' + error.message, true); }
+      }
+    } else {
+      try {
+        seed = validateState(window.__peSeed);
+      } catch (error) {
+        seed = {format: FORMAT, version: 1, deckId, documentId: 'acute-exercise-main-v1', patches: {}};
+        message('Saved edits could not be loaded: ' + error.message, true);
+      }
     }
     patches = seed.patches;
     applyAll();
     render();
-    files.loadDraft(seed.documentId).then(value => {
-      if (value) availableDraft = validateState(value);
-      draftChecked = true;
-      resumeDraft();
-    }).catch(error => { draftChecked = true; message(error.message, true); });
+    if (!studio) {
+      files.loadDraft(seed.documentId).then(value => {
+        if (value) availableDraft = validateState(value);
+        draftChecked = true;
+        resumeDraft();
+      }).catch(error => { draftChecked = true; message(error.message, true); });
+    }
     document.body.setAttribute('data-pe-ready', '');
-    if (new URLSearchParams(location.search).get('edit') === '1') { ui.setOpen(true); toggle(true); }
+    if (studio) {
+      ui.setOpen(studio.mode === 'edit');
+      toggle(studio.mode === 'edit', false);
+      postStudio('ready', {slideCount: slides.length, loaded: studioLoaded,
+        items: Array.from(records.values(), record => ({id: record.id, type: record.type, slideIndex: record.slideIndex,
+          elementId: record.element.dataset.peId,
+          ...(record.type === 'motion' ? {original: record.original, duration: record.baseline.duration, delay: record.baseline.delay}
+            : {motionId: record.motion.id})}))});
+    } else if (new URLSearchParams(location.search).get('edit') === '1') { ui.setOpen(true); toggle(true); }
   }
 
   let attempts = 0;
   function ready() {
     const deck = document.querySelector('deck-stage');
-    if (deck && typeof deck._fit === 'function' && deck.length === 43 && deck.shadowRoot && deck.shadowRoot.querySelector('.canvas')) {
-      start(deck);
+    if (deck && typeof deck._fit === 'function' && deck.length > 0 && deck.shadowRoot && deck.shadowRoot.querySelector('.canvas')) {
+      try { start(deck); }
+      catch (error) { console.error('The presentation editor could not initialize:', error); }
     } else if (++attempts < 200) setTimeout(ready, 50);
     else console.error('The presentation editor could not initialize. Reload the page to try again.');
   }

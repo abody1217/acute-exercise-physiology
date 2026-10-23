@@ -35,8 +35,10 @@
   }
 
   class PresentationEditorUI {
-    constructor(callbacks) {
+    constructor(callbacks, settings) {
       this.callbacks = callbacks || {};
+      this.settings = settings || {};
+      this.studio = Boolean(this.settings.studio);
       this.open = false;
       this.selected = null;
       this.activeTab = 'text';
@@ -46,6 +48,7 @@
       this.root = element('div', 'pe-root');
       this.element = this.root;
       this.root.dataset.presentationEditorUi = 'true';
+      this.root.dataset.peWorkspace = this.studio ? 'studio' : 'standalone';
 
       this.launcher = button('Edit presentation', 'pe-launcher', () => this.toggle(true));
       this.launcher.setAttribute('aria-expanded', 'false');
@@ -136,12 +139,15 @@
 
       var sharing = element('section', 'pe-sharing');
       sharing.append(element('h3', 'pe-section-heading', 'Save & share'));
-      this.sharingHelp = element('p', 'pe-help', 'Changes save to this browser. Update the shared link in two steps.');
+      this.sharingHelp = element('p', 'pe-help', this.studio ? 'Save your changes online to update this presentation. You can also download a backup.' : 'Changes save to this browser. Update the shared link in two steps.');
       sharing.append(this.sharingHelp);
+      this.saveOnlineButton = button('Save online', 'pe-button pe-button-primary pe-full pe-save-online', () => this.invoke('onSaveOnline'));
+      this.saveOnlineButton.hidden = !this.studio;
+      sharing.append(this.saveOnlineButton);
       var publishSteps = element('ol', 'pe-publish-steps');
       var downloadStep = element('li', 'pe-publish-step');
       downloadStep.append(element('h4', 'pe-step-heading', 'Download your edits'));
-      this.downloadButton = button('Download updated index.html', 'pe-button pe-button-primary pe-full pe-download', () => this.invoke('onDownload'));
+      this.downloadButton = button(this.studio ? 'Download presentation backup' : 'Download updated index.html', 'pe-button pe-button-primary pe-full pe-download', () => this.invoke('onDownload'));
       downloadStep.append(this.downloadButton);
       downloadStep.append(element('p', 'pe-hint', 'Keep the filename index.html. If your browser adds a number, rename the file.'));
       var uploadStep = element('li', 'pe-publish-step');
@@ -154,9 +160,11 @@
       uploadStep.append(this.githubUploadLink);
       uploadStep.append(element('p', 'pe-hint', 'Sign in with repository edit access. Replace index.html in the root folder, then commit changes to main. The shared link updates after deployment. Without GitHub access, send the downloaded index.html to the presentation owner to publish.'));
       publishSteps.append(downloadStep, uploadStep);
-      sharing.append(publishSteps);
+      if (this.studio) sharing.append(this.downloadButton);
+      else sharing.append(publishSteps);
       var backupRow = element('div', 'pe-backup-row');
-      backupRow.append(button('Export changes', 'pe-button pe-button-secondary', () => this.invoke('onExport')));
+      this.exportChangesButton = button('Export changes', 'pe-button pe-button-secondary', () => this.invoke('onExport'));
+      backupRow.append(this.exportChangesButton);
       this.importInput = element('input', 'pe-visually-hidden');
       this.importInput.type = 'file';
       this.importInput.accept = '.json,application/json';
@@ -168,9 +176,10 @@
         if (file) this.invoke('onImport', file);
         this.importInput.value = '';
       });
-      backupRow.append(button('Import changes', 'pe-button pe-button-secondary', () => this.importInput.click()));
+      this.importChangesButton = button('Import changes', 'pe-button pe-button-secondary', () => this.importInput.click());
+      backupRow.append(this.importChangesButton);
       sharing.append(backupRow, this.importInput);
-      sharing.append(element('p', 'pe-hint', 'Export a backup to continue editing on another browser.'));
+      sharing.append(element('p', 'pe-hint', this.studio ? 'Saved changes are available when you sign in on another device.' : 'Export a backup to continue editing on another browser.'));
       this.resetButton = button('Reset all edits', 'pe-button pe-button-link pe-reset', () => this.showResetDialog());
       sharing.append(this.resetButton);
       scrollArea.append(sharing);
@@ -384,6 +393,12 @@
       this.undoButton.disabled = !state.canUndo;
       this.redoButton.disabled = !state.canRedo;
       this.root.classList.toggle('pe-has-edits', Boolean(state.dirty));
+      var blocked = state.loading === true;
+      [this.applyTextButton, this.applyImageButton, this.applyMotionButton, this.downloadButton,
+        this.exportChangesButton, this.importChangesButton, this.resetButton].forEach(control => { control.disabled = blocked; });
+      this.saveOnlineButton.disabled = blocked || Boolean(state.saving) || !state.dirty;
+      this.undoButton.disabled = blocked || !state.canUndo;
+      this.redoButton.disabled = blocked || !state.canRedo;
       this.emptyState.hidden = Boolean(selected);
       this.tabs.hidden = !selected;
       this.tabButtons.text.disabled = !selected || selected.type !== 'text';
