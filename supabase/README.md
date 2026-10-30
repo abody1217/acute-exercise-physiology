@@ -12,7 +12,7 @@ This directory supplies the Supabase database, private Storage policies, and the
 
 ## Deploy and bootstrap
 
-1. Use a dedicated project and apply `migrations/202610230001_presentation_studio.sql`. For the one-time connector bootstrap below, also apply `202610230002_studio_bootstrap.sql`. Each migration is transactional. The global Storage file limit must allow 40 MiB (41,943,040 bytes); individual buckets have tighter limits as listed below.
+1. Use a dedicated project and apply `migrations/202610230001_presentation_studio.sql` and `202610300001_versioned_originals.sql`. For the one-time connector bootstrap below, also apply `202610230002_studio_bootstrap.sql`. Each migration is transactional. The global Storage file limit must allow 40 MiB (41,943,040 bytes); individual buckets have tighter limits as listed below.
 2. Keep email/password authentication enabled. Disable public signups in Auth settings when available. Uninvited accounts are denied by the allowlist even if public Auth signup remains enabled.
 3. Deploy `studio-access` including `handler.mjs` and `_shared/invitations.mjs`. The optional `STUDIO_SITE_URL` overrides the exact default Studio URL in `index.ts`; change that default when reusing this project elsewhere. The deployed Studio origin is allowed automatically. Optional `STUDIO_ALLOWED_ORIGINS` is a comma-separated list of exact development origins; remove development origins before delivery. Never allow `*` or the opaque iframe origin `null`.
 4. Supabase supplies `SUPABASE_URL` and server credentials. The function prefers `SUPABASE_SECRET_KEYS.default`, with `SUPABASE_SERVICE_ROLE_KEY` as a compatibility fallback. These credentials stay in the server environment. `verify_jwt = false` is intentional: the function verifies every caller itself using `auth.getUser(jwt)` and then checks server-stored membership.
@@ -44,7 +44,7 @@ title: 1–160 characters
 original_filename: 1–255 characters
 slide_count: integer 1–500
 format: html | pdf | pptx
-original_path: <id>/original.<format>
+original_path: <id>/original.<format> | <id>/original-<uuid>.<format>
 cover_path: null | <id>/cover.png | <id>/cover.jpeg | <id>/cover.webp
 patches: validated map, initially {}
 revision: integer, initially 0
@@ -60,6 +60,14 @@ created_at, updated_at, created_by, updated_by
 Use MIME `text/html`, `application/pdf`, or `application/vnd.openxmlformats-officedocument.presentationml.presentation` explicitly for originals. PPTX and PDF support here means original-file storage; conversion/rendering fidelity is a frontend concern. Native PowerPoint animations cannot be recovered by changing the Storage format.
 
 Upload an original first, then call `create_presentation`. If creation fails, remove the newly uploaded orphan files with the admin session. Signed URLs are unnecessary for originals: use authenticated `storage.from(bucket).download(path)` and keep the bytes in the parent Studio. An administrator can list/read orphan objects for cleanup; editors cannot read objects whose presentation no longer exists.
+
+### Replacing an existing original
+
+A replacement keeps the presentation ID and shared link. It uses a fresh immutable `original-<uuid>.<format>` object under the same presentation folder; the current original is retained for rollback. The path constraint accepts both forms. Browser creation and upload rules still use `original.<format>` and cannot overwrite an existing object.
+
+For a controlled operator update, first save the full current row and a local original backup. Verify the source against Storage metadata and inspect saved patches before changing element or slide numbering. The temporary `studio-original-upload` handler accepts only one configured presentation, current revision/path/slide count, exact file size and SHA-256, and a short-lived random capability. It rejects browser origins, uploads without upsert, then downloads and hashes the stored bytes. It does not change metadata. Fill its deployment template only in the deployment payload; keep the raw capability in a private local file outside Git.
+
+After staging verifies, atomically compare the current revision/path/patches with the snapshot and switch `original_path`, `slide_count` and validated patches, incrementing `revision`. Abort if anything changed. Retain the previous immutable object, then replace the upload endpoint with the unconditional 410 stub and delete its retired local capability. A rollback must also compare the current revision and increment it; never decrement a revision or overwrite newer client edits.
 
 ### RPCs
 

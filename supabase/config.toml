@@ -11,3 +11,7 @@ verify_jwt = false
 
 [functions.studio-test-setup]
 verify_jwt = false
+
+# Temporary fixed-file maintenance endpoint; replace with disabled.ts after use.
+[functions.studio-original-upload]
+verify_jwt = false

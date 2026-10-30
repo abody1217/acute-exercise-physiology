@@ -19,14 +19,16 @@ try:
         '--tmpfs', '/var/lib/postgresql/data', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust',
         'postgres:17', stdout=subprocess.DEVNULL)
     for attempt in range(60):
-        ready = subprocess.run(['docker', 'exec', container, 'pg_isready', '-U', 'postgres'],
+        # The initialization server listens only on its Unix socket and then
+        # restarts. TCP readiness avoids racing that temporary server shutdown.
+        ready = subprocess.run(['docker', 'exec', container, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres'],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if ready.returncode == 0:
             break
         time.sleep(0.25)
     else:
         raise RuntimeError('Test PostgreSQL did not start')
-    for script in [root / 'tests/fixture.sql', *sorted((root / 'migrations').glob('*.sql')), root / 'tests/bootstrap.sql', root / 'tests/authorization.sql']:
+    for script in [root / 'tests/fixture.sql', *sorted((root / 'migrations').glob('*.sql')), root / 'tests/bootstrap.sql', root / 'tests/authorization.sql', root / 'tests/versioned-originals.sql']:
         print('Running', script.name, flush=True)
         run('docker', 'exec', '-i', container, 'psql', '-U', 'postgres', '-X', '-v', 'ON_ERROR_STOP=1', '-q', input=script.read_text())
     print('PostgreSQL authorization checks passed.')
