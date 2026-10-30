@@ -47,7 +47,7 @@ def build():
     template = json.loads(match.group(2))
     parser = IdentifySlides(template)
     parser.feed(template)
-    assert parser.slide == 43
+    assert 1 <= parser.slide <= 500, 'The presentation must contain between 1 and 500 slides.'
     for at, addition in reversed(parser.insertions):
         template = template[:at] + addition + template[at:]
     css = '\n'.join((ROOT / 'editor' / name).read_text() for name in ['editor-ui.css', 'editor.css'])
